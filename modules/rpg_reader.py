@@ -43,7 +43,14 @@ import numpy as np
 from datetime import datetime, timedelta
 import struct
 
-class RPGRead:
+class RPGReader:
+    '''
+    def __init__(self,f,*args):
+        self.raw_file = raw_file
+        self.feather_dir = feather_dir
+        if prefix is None: self.prefix = 'icn_metar'
+    '''
+
     #
     # A1: LWP: Liquid Water Path (p.133, RPG_MWR_STD_Software_Manual 2015)
     #
@@ -2025,57 +2032,103 @@ class RPGRead:
 # ================================================================================================
 # ================================================================================================
 # ================================================================================================
-# Sample code
-import pandas as pd
-import sys, os
-from pandas import Series
-rpg = RPG()
 
-'''
-#
-# Test 'read_cal_log' function
-#
+if __name__ == '__main__':    # 프로그램의 시작점일 때만 아래 코드 실행
 
-root = "/Users/reno/Downloads/210819_cal_history/CAL.LOGs"
-print("Reading file... ", "CAL1.LOG")
-df = rpg.read_cal_log( os.path.join(root, "CAL1.LOG") )
+    # Sample code
+    import pandas as pd
+    import sys, os
+    from pandas import Series
+    rpg = RPGReader()
 
-print(df)
-'''
+    '''
+    #
+    # Test 'read_cal_log' function
+    #
 
-'''
-#
-# Read multiple HIS files
-#
+    root = "/Users/reno/Downloads/210819_cal_history/CAL.LOGs"
+    print("Reading file... ", "CAL1.LOG")
+    df = rpg.read_cal_log( os.path.join(root, "CAL1.LOG") )
 
-directory = "/Users/reno/Downloads/210819_cal_history"
+    print(df)
+    '''
 
-file = []
-name = []
-for root, dirs, files in os.walk(directory):
-    for f in files:
-        if f.endswith('.HIS'):
-            file += [f]
-            temp = f.split(".")
-            name += [ temp[0] ]
+    '''
+    #
+    # Read multiple HIS files
+    #
+
+    directory = "/Users/reno/Downloads/210819_cal_history"
+
+    file = []
+    name = []
+    for root, dirs, files in os.walk(directory):
+        for f in files:
+            if f.endswith('.HIS'):
+                file += [f]
+                temp = f.split(".")
+                name += [ temp[0] ]
 
 
-for j in range(len(file)):
+    for j in range(len(file)):
 
-    print("Reading file... ", file[j])
-    kwargs = {"skip":0, "eof":1}
-    df = rpg.read_abscal_his( os.path.join(root, file[j]), **kwargs )
+        print("Reading file... ", file[j])
+        kwargs = {"skip":0, "eof":1}
+        df = rpg.read_abscal_his( os.path.join(root, file[j]), **kwargs )
+
+        df_elements = [   'entlen',      'inst', 'r1caltype', 'r2caltype',    'r1time', 
+                        'r2time',    'r1tamb',    'r2tamb',    'r1pres',    'r2pres', 
+                        'r1hot',     'r2hot',    'r1cold',    'r2cold',   'r1freqn', 
+                        'r1freq',   'r2freqn',    'r2freq',      'flag',      'gain',
+                        'noise',      'sysn',     'alpha']
+        df_hdrtypes = [          0,           0,           0,           0,          0,
+                                0,           0,           0,           0,          0,
+                                0,           0,           0,           0,          0,
+                                1,           0,           2,           3,          3,
+                                3,           3,           3]
+        receiver_1    = ["ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07"]
+        receiver_2    = ["ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14"] 
+
+        data = []
+        for i in range(len(df_elements)):
+            if i == 0: 
+                data = pd.DataFrame(df['cal_entlen'], columns=[df_elements[0]])
+            else:
+                if df_hdrtypes[i] == 0:
+                    data[df_elements[i]] = df[''.join(['cal_', df_elements[i]])]
+                elif df_hdrtypes[i] == 1:
+                    data[ [df_elements[i] + '_' + sub for sub in receiver_1] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
+                elif df_hdrtypes[i] == 2:
+                    data[ [df_elements[i] + '_' + sub for sub in receiver_2] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
+                else:
+                    data[ [df_elements[i] + '_' + sub for sub in [*receiver_1, *receiver_2]] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
+
+        fout = '.'.join([name[j], "csv"])
+        print(fout, df["cal_n"])
+        data.to_csv( fout )
+    '''
+
+    #
+    # Read a single HIS file
+    #
+
+    root = "/Users/reno/Downloads/210819_cal_history"
+    print("Reading file... ", "ABSCAL1_5.HIS")
+    kwargs = {"skip":3621, "eof":1}
+    df = rpg.read_abscal_his( os.path.join(root, "ABSCAL1_5.HIS"), **kwargs )
+
+    print('No of records: ', df["cal_n"])
 
     df_elements = [   'entlen',      'inst', 'r1caltype', 'r2caltype',    'r1time', 
-                      'r2time',    'r1tamb',    'r2tamb',    'r1pres',    'r2pres', 
-                       'r1hot',     'r2hot',    'r1cold',    'r2cold',   'r1freqn', 
-                      'r1freq',   'r2freqn',    'r2freq',      'flag',      'gain',
-                       'noise',      'sysn',     'alpha']
+                    'r2time',    'r1tamb',    'r2tamb',    'r1pres',    'r2pres', 
+                    'r1hot',     'r2hot',    'r1cold',    'r2cold',   'r1freqn', 
+                    'r1freq',   'r2freqn',    'r2freq',      'flag',      'gain',
+                    'noise',      'sysn',     'alpha']
     df_hdrtypes = [          0,           0,           0,           0,          0,
-                             0,           0,           0,           0,          0,
-                             0,           0,           0,           0,          0,
-                             1,           0,           2,           3,          3,
-                             3,           3,           3]
+                            0,           0,           0,           0,          0,
+                            0,           0,           0,           0,          0,
+                            1,           0,           2,           3,          3,
+                            3,           3,           3]
     receiver_1    = ["ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07"]
     receiver_2    = ["ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14"] 
 
@@ -2093,56 +2146,13 @@ for j in range(len(file)):
             else:
                 data[ [df_elements[i] + '_' + sub for sub in [*receiver_1, *receiver_2]] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
 
-    fout = '.'.join([name[j], "csv"])
-    print(fout, df["cal_n"])
-    data.to_csv( fout )
-'''
+    print(data)
+    print(data['sysn_ch11'])
+    #fout = '.'.join([name[j], "csv"])
+    #print(fout, df["cal_n"])
+    #data.to_csv( fout )
 
-#
-# Read a single HIS file
-#
-
-root = "/Users/reno/Downloads/210819_cal_history"
-print("Reading file... ", "ABSCAL1_5.HIS")
-kwargs = {"skip":3621, "eof":1}
-df = rpg.read_abscal_his( os.path.join(root, "ABSCAL1_5.HIS"), **kwargs )
-
-print('No of records: ', df["cal_n"])
-
-df_elements = [   'entlen',      'inst', 'r1caltype', 'r2caltype',    'r1time', 
-                  'r2time',    'r1tamb',    'r2tamb',    'r1pres',    'r2pres', 
-                   'r1hot',     'r2hot',    'r1cold',    'r2cold',   'r1freqn', 
-                  'r1freq',   'r2freqn',    'r2freq',      'flag',      'gain',
-                   'noise',      'sysn',     'alpha']
-df_hdrtypes = [          0,           0,           0,           0,          0,
-                         0,           0,           0,           0,          0,
-                         0,           0,           0,           0,          0,
-                         1,           0,           2,           3,          3,
-                         3,           3,           3]
-receiver_1    = ["ch01", "ch02", "ch03", "ch04", "ch05", "ch06", "ch07"]
-receiver_2    = ["ch08", "ch09", "ch10", "ch11", "ch12", "ch13", "ch14"] 
-
-data = []
-for i in range(len(df_elements)):
-    if i == 0: 
-        data = pd.DataFrame(df['cal_entlen'], columns=[df_elements[0]])
-    else:
-        if df_hdrtypes[i] == 0:
-            data[df_elements[i]] = df[''.join(['cal_', df_elements[i]])]
-        elif df_hdrtypes[i] == 1:
-            data[ [df_elements[i] + '_' + sub for sub in receiver_1] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
-        elif df_hdrtypes[i] == 2:
-            data[ [df_elements[i] + '_' + sub for sub in receiver_2] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
-        else:
-            data[ [df_elements[i] + '_' + sub for sub in [*receiver_1, *receiver_2]] ] = df[ ''.join(['cal_', df_elements[i]]) ].T
-
-print(data)
-print(data['sysn_ch11'])
-#fout = '.'.join([name[j], "csv"])
-#print(fout, df["cal_n"])
-#data.to_csv( fout )
-
-'''
-## make csv file from each dataframe, please fill the data_name 
-globals()["cal_" + str(r1_data_name)].to_csv(daou + "cal_%s.csv" % r1_data_name)
-'''
+    '''
+    ## make csv file from each dataframe, please fill the data_name 
+    globals()["cal_" + str(r1_data_name)].to_csv(daou + "cal_%s.csv" % r1_data_name)
+    '''
