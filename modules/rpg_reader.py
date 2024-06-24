@@ -162,7 +162,7 @@ class RPGReader:
         atn_freq = []
         atn_min = []
         atn_max = []
-        atn_t = []
+        t_obs = []
         atn_rain = []
         atn_dat = []
         atn_elv = []
@@ -181,7 +181,7 @@ class RPGReader:
                 atn_max.append(struct.unpack('<f', f.read(4))[0] )
             for i in range(atn_n):
                 t = struct.unpack('<i', f.read(4))[0]
-                atn_t.append( t_ref + timedelta(seconds=t) )
+                t_obs.append( t_ref + timedelta(seconds=t) )
                 atn_rain.append(struct.unpack('<c', f.read(1))[0] )
                 tmp = []
                 for vname in range(atn_freqn):
@@ -200,7 +200,7 @@ class RPGReader:
                 'atn_freq': atn_freq,                 #Number of samples
                 'atn_min': atn_min,                 #Number of samples
                 'atn_max': atn_max,                 #Number of samples
-                'atn_t': atn_t,                 #Number of samples
+                't_obs': t_obs,                 #Number of samples
                 'atn_rain': atn_rain,                 #Number of samples
                 'atn_dat': atn_dat,                 #Number of samples
                 'atn_elv': atn_elv}                 #Number of samples
