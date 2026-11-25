@@ -8,6 +8,17 @@ HISTORY:
         0.1 (08-Sep-2018): HKD, BRT, TPC, HPC, IRT functions
         0.2 (04-Apr-2020): LWP, IWV, MET, TPB, ATN functions
         0.3 (11-Nov-2020): LPR, BLB, STA, CBH, BLH, VLT, ABSCAL.HIS, LV0 functions
+        0.4 (24-Nov-2026): HPC relative-humidity block (A10(2), code 117343673);
+                HKD selection byte masked and read LSB-first; BLB records
+                hold n_freq*(n_ang+1) values; IRT old format (code 671112495);
+                retrieval code 1 noted as quadratic regression; manual pages
+                for MET (p.135 old, p.136 new), BLB (p.143), CAL.LOG (p.147)
+                and LV0 (p.160)
+        0.5 (24-Nov-2026): plain BLB elevations stay elevations; brt_timeref
+                and blb_timeref keys; a missing file raises FileNotFoundError;
+                a reader rejects a file code it does not define; MET reads
+                wind speed, wind direction and rain rate when the additional-
+                sensor bits are set
 
 DESCRIPTION: Read all Levels of RPG HATPRO data file.
         A1: LWP-Files (*.LWP), Liquid Water Path
@@ -20,8 +31,9 @@ DESCRIPTION: Read all Levels of RPG HATPRO data file.
         A8: TPB-Files (*.TPB), Temperature Profile Chart (Boundary Layer)
         A9: (Unavailable) WVL-Files (*.WVL), Water Vapour Line Chart
         A10(1): HPC-Files (*.HPC), Humidity Profile Chart (without RH)
-        A10(2): (Unavailable) HPC-Files (*.HPC), Humidity Profile Chart (including RH)
+        A10(2): HPC-Files (*.HPC), Humidity Profile Chart (including RH)
         A11: LPR-Files (*.LPR), Liquid Water Profile Chart
+        A12a: IRT-Files (*.IRT), Infrared Radiometer Temperatures (old)
         A12b: IRT-Files (*.IRT), Infrared Radiometer Temperatures (new)
         A13b: BLB-Files (*.BLB), Boundary Layer BT Profiles (new)
         A14: STA-Files (*.STA), Stability Indices
@@ -43,6 +55,40 @@ import numpy as np
 from datetime import datetime, timedelta
 import struct
 
+def _require_file(path):
+    if not path:
+        raise ValueError('Missing input filename.')
+    if not os.path.isfile(path):
+        raise FileNotFoundError(path)
+
+def _check_code(code, allowed, label):
+    if code not in allowed:
+        expected = ', '.join(str(item) for item in allowed)
+        raise ValueError(
+            '%s file code %s is not supported (expected %s).' % (label, code, expected))
+
+def _decode_elevation_azimuth(ang):
+    '''Split one RPG angle into elevation and azimuth, in degrees.
+
+    A plain elevation, with absolute value below 1000, is returned as that
+    elevation and azimuth 0. Larger values use Ang = sign(El) * (|El| + 1000*Az).
+    When the elevation is at least 100 degrees the stored value is increased
+    by 1000000 and the elevation inside that formula is El - 100.
+    Azimuth and elevation are stored to 0.1 degree.
+    '''
+    x = float(ang)
+    offset = 0.0
+    if x >= 1000000.0:
+        offset = 100.0
+        x -= 1000000.0
+    elif x <= -1000000.0:
+        offset = -100.0
+        x += 1000000.0
+    sign = 1.0 if x >= 0.0 else -1.0
+    azimuth = (abs(x) // 100.0) / 10.0
+    elevation = x - sign * azimuth * 1000.0 + offset
+    return elevation, azimuth
+
 class RPGReader:
     '''
     def __init__(self,f,*args):
@@ -56,9 +102,7 @@ class RPGReader:
     #
     def read_lwp(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -69,6 +113,7 @@ class RPGReader:
         lwp_ang = []
         with open(f, "rb") as f:
             lwp_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(lwp_code, (934501978,), 'LWP')
             lwp_n         = struct.unpack('<I', f.read(4))[0]
             lwp_min       = struct.unpack('<f', f.read(4))[0]
             lwp_max       = struct.unpack('<f', f.read(4))[0]
@@ -77,7 +122,7 @@ class RPGReader:
             # brt_timeref = 0 : LST
             lwp_retrieval = struct.unpack('<I', f.read(4))[0]
             # lwp_retrieval = 0 : Linear regression
-            # lwp_retrieval = 1 : Cubic-spline regression
+            # lwp_retrieval = 1 : Quadratic regression
             # lwp_retrieval = 2 : Neural Network
             for i in range(lwp_n):
                 t = struct.unpack('<i', f.read(4))[0]
@@ -103,9 +148,7 @@ class RPGReader:
     #
     def read_iwv(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -116,6 +159,7 @@ class RPGReader:
         iwv_ang = []
         with open(f, "rb") as f:
             iwv_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(iwv_code, (594811068,), 'IWV')
             iwv_n         = struct.unpack('<I', f.read(4))[0]
             iwv_min       = struct.unpack('<f', f.read(4))[0]
             iwv_max       = struct.unpack('<f', f.read(4))[0]
@@ -124,7 +168,7 @@ class RPGReader:
             # iwv_timeref = 0 : LST
             iwv_retrieval = struct.unpack('<I', f.read(4))[0]
             # iwv_retrieval = 0 : Linear regression
-            # iwv_retrieval = 1 : Cubic-spline regression
+            # iwv_retrieval = 1 : Quadratic regression
             # iwv_retrieval = 2 : Neural Network
             for i in range(iwv_n):
                 t = struct.unpack('<i', f.read(4))[0]
@@ -150,9 +194,7 @@ class RPGReader:
     #
     def read_atn(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -169,6 +211,7 @@ class RPGReader:
 
         with open(f, "rb") as f:
             atn_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(atn_code, (7757564,), 'ATN')
             atn_n         = struct.unpack('<i', f.read(4))[0]
             atn_timeref   = struct.unpack('<i', f.read(4))[0]
             atn_retrieval = struct.unpack('<i', f.read(4))[0]
@@ -210,9 +253,7 @@ class RPGReader:
     #
     def read_brt(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -225,6 +266,8 @@ class RPGReader:
         brt_ang = []
         with open(f, "rb") as f:
             brt_code    = struct.unpack('<I', f.read(4))[0]
+            # 666666 is BRT. 666667 is the same layout used for SPC files.
+            _check_code(brt_code, (666666, 666667), 'BRT')
             brt_n       = struct.unpack('<I', f.read(4))[0]
             brt_timeref = struct.unpack('<I', f.read(4))[0]
             # brt_timeref = 1 : UTC
@@ -250,7 +293,7 @@ class RPGReader:
 
         return {'brt_code': brt_code,
                 'brt_n': brt_n,
-                'brt timeref': brt_timeref,
+                'brt_timeref': brt_timeref,
                 'brt_freqn': brt_freqn,
                 'brt_freq': brt_freq,
                 'brt_min': brt_min,
@@ -260,13 +303,12 @@ class RPGReader:
                 'brt_ang': brt_ang}
 
     #
-    # A5: MET: Meteorological Sensors (p.135, RPG_MWR_STD_Software_Manual 2015)
+    # A5: MET: Meteorological Sensors (old format p.135, new format p.136,
+    #     RPG_MWR_STD_Software_Manual 2015)
     #
     def read_met(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -277,31 +319,41 @@ class RPGReader:
         met_dat1 = [] # Pressure [hPa]
         met_dat2 = [] # Temperature [K]
         met_dat3 = [] # RH% [%]
+        met_wspd = [] # Wind speed [km/h], when bit 0 is set
+        met_wdir = [] # Wind direction [deg], when bit 1 is set
+        met_rrate = [] # Rain rate, when bit 2 is set
         # For STRUC.UNPACK, visit 
         #https://docs.python.org/3/library/struct.html#struct-format-strings
         with open(f, "rb") as f:
             met_code    = struct.unpack('<I', f.read(4))[0]
+            _check_code(met_code, (599658943, 599658944), 'MET')
             met_n       = struct.unpack('<I', f.read(4))[0]
-            # For old version
+            # Old format has no additional-sensor byte. In the new format the
+            # byte is a bit field: bit 0 wind speed, bit 1 wind direction,
+            # bit 2 rain rate (manual p.136).
             if (met_code == 599658943):
                 met_nsen = 0
             else:
-                met_nsen = struct.unpack('<c', f.read(1))[0]
-            #rf = f.read(1) # Dummy
-            #print( int.from_bytes(rf, byteorder='little') )
-            #print( bin(int.from_bytes(rf, byteorder='little'))[2:] )
-            #met_nsen.append( bin(int.from_bytes(rf, byteorder='little'))[2:] )
+                met_nsen = struct.unpack('<B', f.read(1))[0]
             met_minp    = struct.unpack('=f', f.read(4))[0]
             met_maxp    = struct.unpack('<f', f.read(4))[0]
             met_mint    = struct.unpack('<f', f.read(4))[0]
             met_maxt    = struct.unpack('<f', f.read(4))[0]
             met_minh    = struct.unpack('<f', f.read(4))[0]
             met_maxh    = struct.unpack('<f', f.read(4))[0]
+            met_min_wspd = met_max_wspd = None
+            met_min_wdir = met_max_wdir = None
+            met_min_rrate = met_max_rrate = None
+            if met_nsen & 0x1:
+                met_min_wspd = struct.unpack('<f', f.read(4))[0]
+                met_max_wspd = struct.unpack('<f', f.read(4))[0]
+            if met_nsen & 0x2:
+                met_min_wdir = struct.unpack('<f', f.read(4))[0]
+                met_max_wdir = struct.unpack('<f', f.read(4))[0]
+            if met_nsen & 0x4:
+                met_min_rrate = struct.unpack('<f', f.read(4))[0]
+                met_max_rrate = struct.unpack('<f', f.read(4))[0]
             met_timeref = struct.unpack('<I', f.read(4))[0]
-            #t           = struct.unpack('<I', f.read(4))[0]
-            #t_obs.append( t_ref + timedelta(seconds=t) )
-            #met_rain    = struct.unpack('<b', f.read(1))[0]
-            #rf = f.read(1) # Dummy
             for i in range(met_n):
                 t           = struct.unpack('<I', f.read(4))[0]
                 t_obs.append( t_ref + timedelta(seconds=t) )
@@ -311,6 +363,12 @@ class RPGReader:
                 met_dat1.append( struct.unpack('<f', f.read(4))[0] )
                 met_dat2.append( struct.unpack('<f', f.read(4))[0] )
                 met_dat3.append( struct.unpack('<f', f.read(4))[0] )
+                if met_nsen & 0x1:
+                    met_wspd.append( struct.unpack('<f', f.read(4))[0] )
+                if met_nsen & 0x2:
+                    met_wdir.append( struct.unpack('<f', f.read(4))[0] )
+                if met_nsen & 0x4:
+                    met_rrate.append( struct.unpack('<f', f.read(4))[0] )
         f.close()
 
         return {'met_code': met_code,
@@ -322,12 +380,21 @@ class RPGReader:
                 'met_maxt': met_maxt,
                 'met_minh': met_minh,
                 'met_maxh': met_maxh,
+                'met_min_wspd': met_min_wspd,
+                'met_max_wspd': met_max_wspd,
+                'met_min_wdir': met_min_wdir,
+                'met_max_wdir': met_max_wdir,
+                'met_min_rrate': met_min_rrate,
+                'met_max_rrate': met_max_rrate,
                 'met_timeref': met_timeref,
                 't_obs': t_obs,
                 'met_rain': met_rain,
                 'met_dat1': met_dat1,
                 'met_dat2': met_dat2,
-                'met_dat3': met_dat3}
+                'met_dat3': met_dat3,
+                'met_wspd': met_wspd,
+                'met_wdir': met_wdir,
+                'met_rrate': met_rrate}
 
     #
     # A6: OLC: Oxygen Line Chart (p.137, RPG_MWR_STD_Software_Manual 2015)
@@ -338,9 +405,7 @@ class RPGReader:
     #
     def read_tpc(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -350,6 +415,7 @@ class RPGReader:
         tpc_alt = []
         with open(f, "rb") as f:
             tpc_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(tpc_code, (780798065,), 'TPC')
             tpc_n         = struct.unpack('<I', f.read(4))[0]
             tpc_min       = struct.unpack('<f', f.read(4))[0]
             tpc_max       = struct.unpack('<f', f.read(4))[0]
@@ -358,7 +424,7 @@ class RPGReader:
             # tpc_timeref = 0 : LST
             tpc_retrieval = struct.unpack('<I', f.read(4))[0]
             # tpc_retrieval = 0 : Linear regression
-            # tpc_retrieval = 1 : Cubic-spline regression
+            # tpc_retrieval = 1 : Quadratic regression
             # tpc_retrieval = 2 : Neural Network
             tpc_altn      = struct.unpack('<I', f.read(4))[0]
             for i in range(tpc_altn):
@@ -390,9 +456,7 @@ class RPGReader:
     #
     def read_tpb(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -402,6 +466,7 @@ class RPGReader:
         tpb_alt = []
         with open(f, "rb") as f:
             tpb_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(tpb_code, (459769847,), 'TPB')
             tpb_n         = struct.unpack('<I', f.read(4))[0]
             tpb_min       = struct.unpack('<f', f.read(4))[0]
             tpb_max       = struct.unpack('<f', f.read(4))[0]
@@ -410,7 +475,7 @@ class RPGReader:
             # tpb_timeref = 0 : LST
             tpb_retrieval = struct.unpack('<I', f.read(4))[0]
             # tpb_retrieval = 0 : Linear regression
-            # tpb_retrieval = 1 : Cubic-spline regression
+            # tpb_retrieval = 1 : Quadratic regression
             # tpb_retrieval = 2 : Neural Network
             tpb_altn      = struct.unpack('<I', f.read(4))[0]
             for i in range(tpb_altn):
@@ -442,13 +507,13 @@ class RPGReader:
     #
 
     #
-    # A10(1): HPC: Humidity Profile Chart (w/out RH) (p.139, RPG_MWR_STD_Software_Manual 2015)
+    # A10: HPC: Humidity Profile Chart (p.139, RPG_MWR_STD_Software_Manual 2015)
+    # A10(1) code 117343672 is absolute humidity only.
+    # A10(2) code 117343673 repeats the samples as relative humidity.
     #
     def read_hpc(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -456,8 +521,12 @@ class RPGReader:
         t_ref = datetime.strptime('20010101000000', "%Y%m%d%H%M%S")
         t_obs = []
         hpc_alt = []
+        hpc_rhmin = None
+        hpc_rhmax = None
+        hpc_rh = None
         with open(f, "rb") as f:
             hpc_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(hpc_code, (117343672, 117343673), 'HPC')
             hpc_n         = struct.unpack('<I', f.read(4))[0]
             hpc_min       = struct.unpack('<f', f.read(4))[0]
             hpc_max       = struct.unpack('<f', f.read(4))[0]
@@ -466,7 +535,7 @@ class RPGReader:
             # hpc_timeref = 0 : LST
             hpc_retrieval = struct.unpack('<I', f.read(4))[0]
             # hpc_retrieval = 0 : Linear regression
-            # hpc_retrieval = 1 : Cubic-spline regression
+            # hpc_retrieval = 1 : Quadratic regression
             # hpc_retrieval = 2 : Neural Network
             hpc_altn      = struct.unpack('<I', f.read(4))[0]
             for i in range(hpc_altn):
@@ -480,6 +549,18 @@ class RPGReader:
                     tmp.append( struct.unpack('<f', f.read(4))[0] )
                 if i == 0: hpc_dat = np.c_[tmp]
                 else:      hpc_dat = np.c_[hpc_dat, tmp]
+            # A10(2): the same samples follow once more, as relative humidity.
+            if hpc_code == 117343673:
+                hpc_rhmin = struct.unpack('<f', f.read(4))[0]
+                hpc_rhmax = struct.unpack('<f', f.read(4))[0]
+                for i in range(hpc_n):
+                    t = struct.unpack('<i', f.read(4))[0]
+                    rf = f.read(1) # Dummy
+                    tmp = []
+                    for j in range(hpc_altn):
+                        tmp.append( struct.unpack('<f', f.read(4))[0] )
+                    if i == 0: hpc_rh = np.c_[tmp]
+                    else:      hpc_rh = np.c_[hpc_rh, tmp]
         f.close()
 
         return {'hpc_code': hpc_code,
@@ -491,16 +572,17 @@ class RPGReader:
                 'hpc_altn': hpc_altn,
                 't_obs': t_obs,
                 'hpc_alt': hpc_alt,
-                'hpc_dat': hpc_dat}
+                'hpc_dat': hpc_dat,
+                'hpc_rhmin': hpc_rhmin,
+                'hpc_rhmax': hpc_rhmax,
+                'hpc_rh': hpc_rh}
 
     #
     # A11: LPR: Liquid Water Profile Chart (p.140, RPG_MWR_STD_Software_Manual 2015)
     #
     def read_lpr(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -510,6 +592,7 @@ class RPGReader:
         lpr_alt = []
         with open(f, "rb") as f:
             lpr_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(lpr_code, (4567,), 'LPR')
             lpr_n         = struct.unpack('<I', f.read(4))[0]
             lpr_min       = struct.unpack('<f', f.read(4))[0]
             lpr_max       = struct.unpack('<f', f.read(4))[0]
@@ -518,7 +601,7 @@ class RPGReader:
             # lpr_timeref = 0 : LST
             lpr_retrieval = struct.unpack('<I', f.read(4))[0]
             # lpr_retrieval = 0 : Linear regression
-            # lpr_retrieval = 1 : Cubic-spline regression
+            # lpr_retrieval = 1 : Quadratic regression
             # lpr_retrieval = 2 : Neural Network
             lpr_altn      = struct.unpack('<I', f.read(4))[0]
             for i in range(lpr_altn):
@@ -547,12 +630,12 @@ class RPGReader:
 
     #
     # A12: IRT: Infrared Radiometer Temperatures (p.141, RPG_MWR_STD_Software_Manual 2015)
+    # A12a code 671112495 (old): one temperature per sample, no wavelength or angle.
+    # A12b code 671112496 (new): FreqAnz wavelengths, then temperature and angle.
     #
     def read_irt(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -563,26 +646,31 @@ class RPGReader:
         irt_ang = []
         with open(f, "rb") as f:
             irt_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(irt_code, (671112495, 671112496), 'IRT')
             irt_n         = struct.unpack('<I', f.read(4))[0]
             irt_min       = struct.unpack('<f', f.read(4))[0]
             irt_max       = struct.unpack('<f', f.read(4))[0]
             irt_timeref   = struct.unpack('<I', f.read(4))[0]
             # irt_timeref = 1 : UTC
             # irt_timeref = 0 : LST
-            irt_freqn     = struct.unpack('<I', f.read(4))[0]
-            for i in range(irt_freqn):
-                irt_freq.append( struct.unpack('<f', f.read(4))[0] )
+            irt_old = (irt_code == 671112495)
+            if irt_old:
+                irt_freqn = 1
+            else:
+                irt_freqn = struct.unpack('<I', f.read(4))[0]
+                for i in range(irt_freqn):
+                    irt_freq.append( struct.unpack('<f', f.read(4))[0] )
             for i in range(irt_n):
                 t = struct.unpack('<i', f.read(4))[0]
                 t_obs.append( t_ref + timedelta(seconds=t) )
                 rf = f.read(1) # Dummy
-                tmp = struct.unpack('<f', f.read(4))[0]
-                #tmp = []
-                #for j in range(irt_freqn): 
-                #    tmp.append( struct.unpack('<f', f.read(4))[0] )
+                tmp = []
+                for j in range(irt_freqn):
+                    tmp.append( struct.unpack('<f', f.read(4))[0] )
                 if i == 0: irt_dat = np.c_[tmp]
                 else:      irt_dat = np.c_[irt_dat, tmp]
-                irt_ang.append( struct.unpack('<f', f.read(4))[0] )
+                if not irt_old:
+                    irt_ang.append( struct.unpack('<f', f.read(4))[0] )
         f.close()
 
         return {'irt_code': irt_code,
@@ -597,13 +685,11 @@ class RPGReader:
                 'irt_ang': irt_ang}
 
     #
-    # A13b: BLB: Boundary Layer BT Profiles (p.142, RPG_MWR_STD_Software_Manual 2015)
+    # A13b: BLB: Boundary Layer BT Profiles (p.143, RPG_MWR_STD_Software_Manual 2015)
     #
     def read_blb(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -618,6 +704,7 @@ class RPGReader:
         blb_azm = []
         with open(f, "rb") as f:
             blb_code    = struct.unpack('<I', f.read(4))[0]
+            _check_code(blb_code, (567845848,), 'BLB')
             blb_n       = struct.unpack('<I', f.read(4))[0]
             blb_freqn   = struct.unpack('<I', f.read(4))[0]
             for vname in range(blb_freqn):
@@ -631,23 +718,28 @@ class RPGReader:
                 blb_freq.append(struct.unpack('<f', f.read(4))[0] )
             blb_angn = struct.unpack('<I', f.read(4))[0]
             for i in range(blb_angn):
-                blb_ang.append( struct.unpack('<f', f.read(4))[0])
-                blb_azm.append( blb_ang[i] / 1000. )
-                blb_elv.append( blb_ang[i] - blb_azm[i] * 1000. )
+                ang = struct.unpack('<f', f.read(4))[0]
+                blb_ang.append(ang)
+                elv, azm = _decode_elevation_azimuth(ang)
+                blb_elv.append(elv)
+                blb_azm.append(azm)
+            # One record holds n_freq * (n_ang + 1) values. The extra
+            # angle is the 0 deg surface temperature, after the scan angles.
+            n_bt = blb_freqn * (blb_angn + 1)
+            blb_dat = np.empty((blb_freqn, blb_angn + 1, blb_n))
             for i in range(blb_n):
                 t = struct.unpack('<i', f.read(4))[0]
                 t_obs.append( t_ref + timedelta(seconds=t) )
                 rf = f.read(1) # Dummy
                 tmp = []
-                for j in range(blb_freqn): 
+                for j in range(n_bt):
                     tmp.append( struct.unpack('<f', f.read(4))[0])
-                if i == 0: blb_dat = np.c_[tmp]
-                else:      blb_dat = np.c_[blb_dat, tmp]
+                blb_dat[:, :, i] = np.reshape(tmp, (blb_freqn, blb_angn + 1))
         f.close()
 
         return {'blb_code': blb_code,
                 'blb_n': blb_n,
-                'brt timeref': blb_timeref,
+                'blb_timeref': blb_timeref,
                 'blb_freqn': blb_freqn,
                 'blb_freq': blb_freq,
                 'blb_min': blb_min,
@@ -664,9 +756,7 @@ class RPGReader:
     #
     def read_sta(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -678,6 +768,7 @@ class RPGReader:
         sta_ang = []
         with open(f, "rb") as f:
             sta_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(sta_code, (454532,), 'STA')
             sta_n         = struct.unpack('<I', f.read(4))[0]
             sta_min       = struct.unpack('<f', f.read(4))[0]
             sta_max       = struct.unpack('<f', f.read(4))[0]
@@ -705,13 +796,11 @@ class RPGReader:
                 'sta_dat': sta_dat}
 
     #
-    # A15: CAL.LOG: Calibration Log-File (p.144, RPG_MWR_STD_Software_Manual 2015)
+    # A15b: CAL.LOG: Calibration Log-File, new version (p.147, RPG_MWR_STD_Software_Manual 2015)
     #
     def read_cal_log(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -735,6 +824,7 @@ class RPGReader:
 
         with open(f, "rb") as f:
             log_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(log_code, (657645,), 'CAL.LOG')
 
             t = struct.unpack('<i', f.read(4))[0]
             log_stime     = t_ref + timedelta(seconds=t)
@@ -963,9 +1053,7 @@ class RPGReader:
     #
     def read_cbh(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -975,6 +1063,7 @@ class RPGReader:
         cbh_dat = []
         with open(f, "rb") as f:
             cbh_code      = struct.unpack('<I', f.read(4))[0]
+            _check_code(cbh_code, (67777499,), 'CBH')
             cbh_n         = struct.unpack('<I', f.read(4))[0]
             cbh_min       = struct.unpack('<f', f.read(4))[0]
             cbh_max       = struct.unpack('<f', f.read(4))[0]
@@ -999,9 +1088,7 @@ class RPGReader:
     #
     def read_blh(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1014,6 +1101,7 @@ class RPGReader:
 
         with open(f, "rb") as f:
             blh_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(blh_code, (1777786,), 'BLH')
             blh_n         = struct.unpack('<i', f.read(4))[0]
             blh_min       = struct.unpack('<f', f.read(4))[0]
             blh_max       = struct.unpack('<f', f.read(4))[0]
@@ -1040,9 +1128,7 @@ class RPGReader:
     #
     def read_vlt(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1062,6 +1148,7 @@ class RPGReader:
 
         with open(f, "rb") as f:
             vlt_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(vlt_code, (362118747,), 'VLT')
             vlt_n         = struct.unpack('<i', f.read(4))[0]
             vlt_timeidx   = struct.unpack('<i', f.read(4))[0]
             vlt_slvrec    = struct.unpack('<i', f.read(4))[0]
@@ -1137,9 +1224,7 @@ class RPGReader:
     #
     def read_hkd(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1156,14 +1241,20 @@ class RPGReader:
         hkd_sts = []
         with open(f, "rb") as f:
             hkd_code     = struct.unpack('<I', f.read(4))[0]
+            _check_code(hkd_code, (837854832,), 'HKD')
             hkd_n        = struct.unpack('<I', f.read(4))[0]
             hkd_timeref  = struct.unpack('<I', f.read(4))[0]
             tmp          = struct.unpack('<i', f.read(4))[0]
-            #hkd_select = f.read(4)
-            #print(np.asarray(tmp, dtype=np.uint8))
-            hkd_select = np.unpackbits(np.asarray(tmp, dtype=np.uint8))
-            #hkd_select[0] = 0
-            #hkd_select[1] = 1
+            # Only the first byte is used. Masking it keeps NumPy 2 from
+            # raising on a value above 255; NumPy 1.x wrapped that overflow.
+            # Manual bit 1 is the least significant bit. unpackbits is
+            # MSB-first, so little-endian order matches the manual. The
+            # leading 0 makes hkd_select[N] equal to manual bit N.
+            bits = np.unpackbits(np.asarray(tmp & 0xFF, dtype=np.uint8),
+                                 bitorder='little')
+            hkd_select = np.empty(bits.size + 1, dtype=np.uint8)
+            hkd_select[0] = 0
+            hkd_select[1:] = bits
             for i in range(hkd_n):
                 t = struct.unpack('<I', f.read(4))[0]
                 t_obs.append( t_ref + timedelta(seconds=t) )
@@ -1443,8 +1534,10 @@ class RPGReader:
                 'hkd_timeref': hkd_timeref,
                 'hkd_select': hkd_select, #HKDSelect
                     # Only the first byte of this integer value is used for 
-                    # selection of data groups. The meaning of the various bit
-                    # settings of this byte is the following:
+                    # selection of data groups. Bit 1 is the least significant
+                    # bit, and hkd_select[N] is manual bit N (index 0 is unused).
+                    # The meaning of the various bit settings of this byte is
+                    # the following:
                     #
                     #  • Bit 1: When this bit is set to ‘1’, the GPS-position 
                     #           (longitude, latitude) is recorded in this
@@ -1476,9 +1569,7 @@ class RPGReader:
     #
     def read_abscal_his(self,f,*args, **kwargs):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
         print(kwargs)
         if not kwargs: skip = 0
         else: skip = kwargs["skip"]
@@ -1519,6 +1610,7 @@ class RPGReader:
 
         with open(f, "rb") as f:
             cal_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(cal_code, (39583209,), 'ABSCAL.HIS')
             cal_n         = struct.unpack('<i', f.read(4))[0] #+ 635
             if eof > 0: 
                 print(int((fsze - 8) / 420))
@@ -1633,13 +1725,12 @@ class RPGReader:
                 'cal_alpha' : cal_alpha}        #Non-linearity factors for all channels, entry #1
 
     #
-    # A21: LV0: Level Zero (Detector Voltages) Files (p.158, RPG_MWR_STD_Software_Manual 2015)
+    # A21b: LV0: Level Zero (Detector Voltages) Files, new version (p.160,
+    #       RPG_MWR_STD_Software_Manual 2015)
     #
     def read_lv0(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1663,6 +1754,7 @@ class RPGReader:
         #lv0_irtmp = []
         with open(f, "rb") as f:
             lv0_code      = struct.unpack('<i', f.read(4))[0]
+            _check_code(lv0_code, (111112,), 'LV0')
             lv0_n         = struct.unpack('<i', f.read(4))[0]
             lv0_idmst     = struct.unpack('<i', f.read(4))[0]
             lv0_idslv     = struct.unpack('<i', f.read(4))[0]
@@ -1796,9 +1888,7 @@ class RPGReader:
     #
     def read_test(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1902,9 +1992,7 @@ class RPGReader:
     #
     def read_abscal_clb(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -1993,9 +2081,7 @@ class RPGReader:
     #
     def read_MainFormSize(self,f,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        _require_file(f)
 
         root = os.path.dirname(f)
         file = os.path.basename(f)
@@ -2003,6 +2089,7 @@ class RPGReader:
         brt_freq = []
         with open(f, "rb") as f:
             mfs_code    = struct.unpack('<I', f.read(4))[0]
+            _check_code(mfs_code, (9,), 'MainFormSize')
             mfs_horz    = struct.unpack('<I', f.read(4))[0]
             mfs_vert    = struct.unpack('<I', f.read(4))[0]
         f.close()
@@ -2016,9 +2103,8 @@ class RPGReader:
     #
     def write_MainFormSize(self,f,h,v,*args):
 
-        if not f: print("Missing argument FN, Please provide input filename.")
-        if not os.path.isfile(f): 
-            print('Input file is nonexists. Returnning...')
+        if not f:
+            raise ValueError('Missing input filename.')
         if not h: h = 1024
         if not v: v = 768
 

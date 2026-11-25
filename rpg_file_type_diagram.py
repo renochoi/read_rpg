@@ -1,3 +1,24 @@
+#!/usr/bin/env python3
+'''
+Created on 25 Jun 2024
+
+@author: Reno Choi (renochoi@korea.kr)
+
+HISTORY:
+        0.1 (25-Jun-2024): Directed graph of relationships between HATPRO
+                file types
+        0.2 (24-Nov-2026): Header added, same form as modules/rpg_reader.py.
+                Reader changes of this date (HPC relative humidity, HKD
+                selection bits, full BLB scan, both IRT formats) are in
+                RPGReader 0.4 and are not drawn here
+
+DESCRIPTION: Draw a directed graph of RPG HATPRO file types.
+        Edges run from the level-zero and housekeeping files toward the
+        brightness temperatures and the retrieved products.
+
+REFERENCE: RPG_MWR_STD_Software_Manual 2015, Appendix A (file formats).
+
+'''
 # Retry generating the diagram
 
 import matplotlib.pyplot as plt

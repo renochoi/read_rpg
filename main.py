@@ -1,3 +1,23 @@
+#!/usr/bin/env python3
+'''
+Created on 25 Jun 2024
+
+@author: Reno Choi (renochoi@korea.kr)
+
+HISTORY:
+        0.1 (25-Jun-2024): Read one day of HATPRO files and print returned keys
+        0.2 (24-Nov-2026): Header added. Calls RPGReader 0.4, which reads the
+                HPC relative-humidity block, HKD selection bits, the full BLB
+                scan, and both IRT formats
+
+DESCRIPTION: Example driver for modules/rpg_reader.RPGReader.
+        Opens one day of RPG HATPRO binary files and prints the file code
+        and the dictionary keys returned by each reader.
+
+REFERENCE: RPG_MWR_STD_Software_Manual 2015, Appendix A (file formats).
+        Readers are implemented in modules/rpg_reader.py.
+
+'''
 import os
 import platform
 import pandas as pd
