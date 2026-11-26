@@ -1,4 +1,4 @@
-# _read_rpg
+# read_rpg
 
 Python reader for the binary data files written by **RPG HATPRO** microwave radiometers (RPG Radiometer Physics GmbH).
 
@@ -110,7 +110,7 @@ python main.py
 ## Repository layout
 
 ```
-_read_rpg/
+read_rpg/
 ├── README.md
 ├── main.py                    # example driver; set rpg_dir to a local data directory
 ├── rpg_file_type_diagram.py   # diagram of file-type dependencies
